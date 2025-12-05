@@ -1,0 +1,57 @@
+name: Deploy multi-agent-ui (self-hosted)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, multi-agent-ui]
+
+    env:
+      DEPLOY_DIR: /home/ec2-user/multi-agent-ui/Multi-Agent-UI
+      COMPOSE_FILE: docker-compose.yml
+
+    steps:
+      - name: Check deploy directory
+        run: |
+          if [ ! -d "${{ env.DEPLOY_DIR }}" ]; then
+            echo "DEPLOY_DIR not found: $DEPLOY_DIR"
+            exit 1
+          fi
+          ls -la "$DEPLOY_DIR"
+
+      - name: Git pull (force sync with main)
+        run: |
+          set -e
+          cd "$DEPLOY_DIR"
+          git fetch origin --prune
+          git reset --hard origin/main
+          git clean -fdx
+          git pull
+
+      - name: Create .env from secret
+        run: |
+          cd "$DEPLOY_DIR"
+          echo "${{ secrets.FRONTEND_ENV }}" > .env
+          echo ".env created"
+
+      - name: Docker Compose Build & Up
+        run: |
+          set -e
+          cd "$DEPLOY_DIR"
+          docker-compose down || true
+          docker-compose up -d --build
+
+      - name: Health Check
+        run: |
+          sleep 5
+          cd "$DEPLOY_DIR"
+          if curl -sSf http://localhost:37123/ > /dev/null; then
+            echo "multi-agent-ui is UP"
+          else
+            echo "multi-agent-ui health check failed"
+            docker-compose logs --tail=200
+            exit 1
+          fi
